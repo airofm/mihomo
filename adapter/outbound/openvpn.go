@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	openvpn "github.com/airofm/sing-openvpn"
@@ -23,6 +24,7 @@ type OpenVPN struct {
 	*Base
 	option   *OpenVPNOption
 	client   *openvpn.Client
+	clientMu sync.Mutex // protects client init and reconnect
 	resolver resolver.Resolver
 }
 
@@ -42,13 +44,35 @@ func (d ovpnNetDialer) DialContext(ctx context.Context, network, address string)
 	return d.client.DialContext(ctx, network, address)
 }
 
+// ensureClient returns an alive client, reconnecting if needed.
+func (o *OpenVPN) ensureClient(ctx context.Context) (*openvpn.Client, error) {
+	o.clientMu.Lock()
+	defer o.clientMu.Unlock()
+
+	if o.client != nil && o.client.IsAlive() {
+		return o.client, nil
+	}
+
+	// Client is nil or dead, need to (re)initialize
+	if o.client != nil {
+		log.Infoln("[OpenVPN](%s) connection dead, reconnecting...", o.proxyName())
+		o.client.Close()
+		o.client = nil
+	}
+
+	if err := o.initClientLocked(ctx); err != nil {
+		return nil, err
+	}
+	return o.client, nil
+}
+
 // DialContext implements C.ProxyAdapter
 func (o *OpenVPN) DialContext(ctx context.Context, metadata *C.Metadata) (C.Conn, error) {
-	if o.client == nil {
-		if err := o.initClient(ctx); err != nil {
-			return nil, err
-		}
+	client, err := o.ensureClient(ctx)
+	if err != nil {
+		return nil, err
 	}
+
 	if !metadata.Resolved() && metadata.Host != "" {
 		if ip, err := o.resolveIPViaVPNDNS(ctx, metadata.Host); err == nil {
 			metadata.DstIP = ip
@@ -58,7 +82,6 @@ func (o *OpenVPN) DialContext(ctx context.Context, metadata *C.Metadata) (C.Conn
 	}
 
 	var conn net.Conn
-	var err error
 	targetAddress := metadata.RemoteAddress()
 	if metadata.DstIP.IsValid() {
 		targetAddress = net.JoinHostPort(metadata.DstIP.String(), strconv.FormatUint(uint64(metadata.DstPort), 10))
@@ -72,10 +95,10 @@ func (o *OpenVPN) DialContext(ctx context.Context, metadata *C.Metadata) (C.Conn
 		}
 		options := o.DialOptions()
 		options = append(options, dialer.WithResolver(r))
-		options = append(options, dialer.WithNetDialer(ovpnNetDialer{client: o.client}))
+		options = append(options, dialer.WithNetDialer(ovpnNetDialer{client: client}))
 		conn, err = dialer.NewDialer(options...).DialContext(dialCtx, "tcp", targetAddress)
 	} else {
-		conn, err = o.client.DialContext(dialCtx, "tcp", targetAddress)
+		conn, err = client.DialContext(dialCtx, "tcp", targetAddress)
 	}
 
 	if err != nil {
@@ -86,10 +109,9 @@ func (o *OpenVPN) DialContext(ctx context.Context, metadata *C.Metadata) (C.Conn
 
 // ListenPacketContext implements C.ProxyAdapter
 func (o *OpenVPN) ListenPacketContext(ctx context.Context, metadata *C.Metadata) (C.PacketConn, error) {
-	if o.client == nil {
-		if err := o.initClient(ctx); err != nil {
-			return nil, err
-		}
+	client, err := o.ensureClient(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := o.ResolveUDP(ctx, metadata); err != nil {
@@ -102,7 +124,7 @@ func (o *OpenVPN) ListenPacketContext(ctx context.Context, metadata *C.Metadata)
 	}
 	packetCtx, packetCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer packetCancel()
-	pc, err := o.client.ListenPacket(packetCtx, targetAddress)
+	pc, err := client.ListenPacket(packetCtx, targetAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +172,10 @@ func (o *OpenVPN) resolveIPViaVPNDNS(ctx context.Context, host string) (netip.Ad
 			return netip.Addr{}, err
 		}
 		lookupCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-		ips, err := res.LookupIPAddr(lookupCtx, host)
+		// Use "ip4" network to only send A queries, avoiding AAAA queries that
+		// get silently dropped by VPN servers with block-ipv6, which would cause
+		// a ~5 second timeout waiting for the AAAA response.
+		ips, err := res.LookupIP(lookupCtx, "ip4", host)
 		cancel()
 		if err != nil {
 			lastErr = err
@@ -160,7 +185,7 @@ func (o *OpenVPN) resolveIPViaVPNDNS(ctx context.Context, host string) (netip.Ad
 			lastErr = fmt.Errorf("can't resolve ip for %s", host)
 			continue
 		}
-		ip, ok := netip.AddrFromSlice(ips[0].IP)
+		ip, ok := netip.AddrFromSlice(ips[0])
 		if !ok {
 			lastErr = fmt.Errorf("can't parse resolved ip for %s", host)
 			continue
@@ -174,7 +199,11 @@ func (o *OpenVPN) IsL3Protocol(metadata *C.Metadata) bool {
 	return true
 }
 
-func (o *OpenVPN) initClient(ctx context.Context) error {
+// initClientLocked creates and connects a new OpenVPN client.
+// Must be called with o.clientMu held.
+func (o *OpenVPN) initClientLocked(ctx context.Context) error {
+	initStart := time.Now()
+	log.Infoln("[OpenVPN](%s) initClient started", o.proxyName())
 	var ovpnContent []byte
 
 	if o.option.Profile != "" {
@@ -208,6 +237,12 @@ func (o *OpenVPN) initClient(ctx context.Context) error {
 		return err
 	}
 
+	// Register onClose callback: when the VPN connection dies,
+	// log it so next request triggers reconnection via ensureClient.
+	client.SetOnClose(func() {
+		log.Warnln("[OpenVPN](%s) VPN connection closed, will reconnect on next request", o.proxyName())
+	})
+
 	// Use a dedicated context with generous timeout for VPN connection establishment,
 	// not the request context which may have a short deadline.
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -216,6 +251,7 @@ func (o *OpenVPN) initClient(ctx context.Context) error {
 		return err
 	}
 	o.client = client
+	log.Infoln("[OpenVPN](%s) VPN client connected successfully, total init time: %s", o.proxyName(), time.Since(initStart))
 	return nil
 }
 
@@ -333,8 +369,12 @@ func (o *OpenVPN) ProxyInfo() C.ProxyInfo {
 
 // Close implements C.ProxyAdapter
 func (o *OpenVPN) Close() error {
+	o.clientMu.Lock()
+	defer o.clientMu.Unlock()
 	if o.client != nil {
-		return o.client.Close()
+		err := o.client.Close()
+		o.client = nil
+		return err
 	}
 	return nil
 }
@@ -345,6 +385,21 @@ func (o *OpenVPN) DialOptions() []dialer.Option {
 		dialer.WithRoutingMark(o.rmark),
 		dialer.WithTFO(o.tfo),
 	}
+}
+
+// PreConnect proactively establishes the OpenVPN tunnel in the background,
+// so the first user request does not have to wait for the full handshake.
+func (o *OpenVPN) PreConnect() {
+	go func() {
+		log.Infoln("[OpenVPN](%s) pre-connecting VPN tunnel in background...", o.proxyName())
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := o.ensureClient(ctx); err != nil {
+			log.Warnln("[OpenVPN](%s) pre-connect failed: %v (will retry on first request)", o.proxyName(), err)
+		} else {
+			log.Infoln("[OpenVPN](%s) pre-connect succeeded, tunnel is ready", o.proxyName())
+		}
+	}()
 }
 
 func NewOpenVPN(option OpenVPNOption) (*OpenVPN, error) {

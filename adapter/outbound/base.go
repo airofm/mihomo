@@ -375,6 +375,10 @@ func (p *autoCloseProxyAdapter) ListenPacketContext(ctx context.Context, metadat
 	return pc, nil
 }
 
+func (p *autoCloseProxyAdapter) InnerAdapter() C.ProxyAdapter {
+	return p.ProxyAdapter
+}
+
 func (p *autoCloseProxyAdapter) Close() error {
 	p.closeOnce.Do(func() {
 		log.Debugln("Closing outdated proxy [%s]", p.Name())

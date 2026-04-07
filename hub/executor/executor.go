@@ -121,6 +121,30 @@ func ApplyConfig(cfg *config.Config, force bool) {
 	updateUpdater(cfg)
 
 	resolver.ResetConnection()
+
+	// Pre-connect OpenVPN proxies in background so the first request doesn't wait for handshake
+	preConnectOpenVPN(cfg.Proxies)
+}
+
+type preConnectable interface {
+	PreConnect()
+}
+
+func preConnectOpenVPN(proxies map[string]C.Proxy) {
+	for name, p := range proxies {
+		if p.Type() != C.OpenVPN {
+			continue
+		}
+		// Unwrap through adapter layers: adapter.Proxy → autoCloseProxyAdapter → *OpenVPN
+		inner := p.Adapter()
+		if wrapper, ok := inner.(interface{ InnerAdapter() C.ProxyAdapter }); ok {
+			inner = wrapper.InnerAdapter()
+		}
+		if pc, ok := inner.(preConnectable); ok {
+			log.Infoln("[OpenVPN] scheduling pre-connect for proxy %q", name)
+			pc.PreConnect()
+		}
+	}
 }
 
 func initInnerTcp() {
