@@ -3,6 +3,7 @@ module github.com/metacubex/mihomo
 go 1.26.1
 
 require (
+	github.com/airofm/sing-openvpn v0.1.2
 	github.com/bahlo/generic-list-go v0.2.0
 	github.com/coreos/go-iptables v0.8.0
 	github.com/dlclark/regexp2 v1.11.5
@@ -73,7 +74,6 @@ require (
 require (
 	github.com/RyuaNerin/go-krypto v1.3.0 // indirect
 	github.com/Yawning/aez v0.0.0-20211027044916-e49e68abd344 // indirect
-	github.com/airofm/sing-openvpn v0.1.2 // indirect
 	github.com/ajg/form v1.5.1 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -121,4 +121,5 @@ require (
 
 // for https://github.com/golang/protobuf/issues/1704
 replace google.golang.org/protobuf => github.com/metacubex/protobuf-go v0.0.0-20260306035419-7ceee0674686
+
 replace github.com/airofm/sing-openvpn => ../sing-openvpn
