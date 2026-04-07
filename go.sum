@@ -3,6 +3,12 @@ github.com/RyuaNerin/go-krypto v1.3.0/go.mod h1:9R9TU936laAIqAmjcHo/LsaXYOZlymud
 github.com/RyuaNerin/testingutil v0.1.0 h1:IYT6JL57RV3U2ml3dLHZsVtPOP6yNK7WUVdzzlpNrss=
 github.com/Yawning/aez v0.0.0-20211027044916-e49e68abd344 h1:cDVUiFo+npB0ZASqnw4q90ylaVAbnYyx0JYqK4YcGok=
 github.com/Yawning/aez v0.0.0-20211027044916-e49e68abd344/go.mod h1:9pIqrY6SXNL8vjRQE5Hd/OL5GyK/9MrGUWs87z/eFfk=
+github.com/airofm/sing-openvpn v0.0.0-20260403185912-fd87c98360c6 h1:brIIYm+mab0w+q5FP1T3iZ93qgF7qaulhTeBnmfWHIA=
+github.com/airofm/sing-openvpn v0.0.0-20260403185912-fd87c98360c6/go.mod h1:0d5pFd2Re6H9WTT+NB/mLtrheyMAHph6OXK35FVD1jY=
+github.com/airofm/sing-openvpn v0.1.0 h1:/wKvZA4RbXGikMhzZq+yBbdU2AGm6LyM2A/SCG6CfnQ=
+github.com/airofm/sing-openvpn v0.1.0/go.mod h1:0d5pFd2Re6H9WTT+NB/mLtrheyMAHph6OXK35FVD1jY=
+github.com/airofm/sing-openvpn v0.1.1 h1:fqMAtanwRSNSPT0qD9K6qNrZFdbW2jGfStJRKPO962c=
+github.com/airofm/sing-openvpn v0.1.1/go.mod h1:0d5pFd2Re6H9WTT+NB/mLtrheyMAHph6OXK35FVD1jY=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=
 github.com/ajg/form v1.5.1/go.mod h1:uL1WgH+h2mgNtvBq0339dVnzXdBETtL2LeUXaIv25UY=
 github.com/andybalholm/brotli v1.0.6 h1:Yf9fFpf49Zrxb9NlQaluyE92/+X7UVHlhMNJN2sxfOI=
