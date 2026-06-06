@@ -30,10 +30,11 @@ type OpenVPN struct {
 
 type OpenVPNOption struct {
 	BasicOption
-	Name     string `proxy:"name"`
-	UserName string `proxy:"username,omitempty"`
-	Password string `proxy:"password,omitempty"`
-	Profile  string `proxy:"profile"`
+	Name         string `proxy:"name"`
+	UserName     string `proxy:"username,omitempty"`
+	Password     string `proxy:"password,omitempty"`
+	Profile      string `proxy:"profile"`
+	DNSProbeHost string `proxy:"dns-probe-host,omitempty"`
 }
 
 type ovpnNetDialer struct {
@@ -41,6 +42,9 @@ type ovpnNetDialer struct {
 }
 
 func (d ovpnNetDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if d.client == nil {
+		return nil, fmt.Errorf("openvpn client not initialized")
+	}
 	return d.client.DialContext(ctx, network, address)
 }
 
@@ -78,7 +82,11 @@ func (o *OpenVPN) DialContext(ctx context.Context, metadata *C.Metadata) (C.Conn
 			metadata.DstIP = ip
 		} else {
 			log.Debugln("[OpenVPN](%s) vpn dns resolve failed for tcp host %s: %v", o.proxyName(), metadata.Host, err)
+			return nil, fmt.Errorf("vpn dns resolve failed: %w", err)
 		}
+	}
+	if !metadata.Resolved() && metadata.Host != "" {
+		return nil, fmt.Errorf("vpn dns resolve failed: unresolved host %s", metadata.Host)
 	}
 
 	var conn net.Conn
@@ -138,32 +146,27 @@ func (o *OpenVPN) ResolveUDP(ctx context.Context, metadata *C.Metadata) error {
 			return nil
 		} else {
 			log.Debugln("[OpenVPN](%s) vpn dns resolve failed for udp host %s: %v", o.proxyName(), metadata.Host, err)
+			return fmt.Errorf("vpn dns resolve failed: %w", err)
 		}
-		r := resolver.DefaultResolver
-		if o.resolver != nil {
-			r = o.resolver
-		}
-		ip, err := resolver.ResolveIPWithResolver(ctx, metadata.Host, r)
-		if err != nil {
-			return fmt.Errorf("can't resolve ip: %w", err)
-		}
-		metadata.DstIP = ip
 	}
 	return nil
 }
 
 func (o *OpenVPN) resolveIPViaVPNDNS(ctx context.Context, host string) (netip.Addr, error) {
-	if o.client == nil {
+	o.clientMu.Lock()
+	client := o.client
+	o.clientMu.Unlock()
+	if client == nil {
 		return netip.Addr{}, fmt.Errorf("openvpn client not initialized")
 	}
 	dnsServer := "8.8.8.8:53"
-	if cfg := o.client.GetConfig(); len(cfg.DNS) > 0 {
+	if cfg := client.GetConfig(); cfg != nil && len(cfg.DNS) > 0 {
 		dnsServer = net.JoinHostPort(cfg.DNS[0], "53")
 	}
 	res := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return o.client.DialContext(ctx, "udp", dnsServer)
+			return client.DialContext(ctx, "udp", dnsServer)
 		},
 	}
 	var lastErr error
@@ -193,6 +196,33 @@ func (o *OpenVPN) resolveIPViaVPNDNS(ctx context.Context, host string) (netip.Ad
 		return ip.Unmap(), nil
 	}
 	return netip.Addr{}, lastErr
+}
+
+func (o *OpenVPN) dnsProbeHost() string {
+	if o.option == nil {
+		return ""
+	}
+	return strings.TrimSpace(o.option.DNSProbeHost)
+}
+
+func (o *OpenVPN) probeVPNDNS(ctx context.Context) error {
+	host := o.dnsProbeHost()
+	if host == "" {
+		return nil
+	}
+	if _, err := o.resolveIPViaVPNDNS(ctx, host); err != nil {
+		return fmt.Errorf("vpn dns probe failed for %s: %w", host, err)
+	}
+	return nil
+}
+
+func (o *OpenVPN) discardClient() {
+	o.clientMu.Lock()
+	defer o.clientMu.Unlock()
+	if o.client != nil {
+		o.client.Close()
+		o.client = nil
+	}
 }
 
 func (o *OpenVPN) IsL3Protocol(metadata *C.Metadata) bool {
@@ -395,6 +425,9 @@ func (o *OpenVPN) PreConnect() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if _, err := o.ensureClient(ctx); err != nil {
+			log.Warnln("[OpenVPN](%s) pre-connect failed: %v (will retry on first request)", o.proxyName(), err)
+		} else if err := o.probeVPNDNS(ctx); err != nil {
+			o.discardClient()
 			log.Warnln("[OpenVPN](%s) pre-connect failed: %v (will retry on first request)", o.proxyName(), err)
 		} else {
 			log.Infoln("[OpenVPN](%s) pre-connect succeeded, tunnel is ready", o.proxyName())

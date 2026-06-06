@@ -3,7 +3,7 @@ module github.com/metacubex/mihomo
 go 1.26.1
 
 require (
-	github.com/airofm/sing-openvpn v0.1.4
+	github.com/airofm/sing-openvpn v0.1.5
 	github.com/bahlo/generic-list-go v0.2.0
 	github.com/coreos/go-iptables v0.8.0
 	github.com/dlclark/regexp2 v1.12.0

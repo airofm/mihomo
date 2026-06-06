@@ -6,6 +6,8 @@ github.com/Yawning/aez v0.0.0-20211027044916-e49e68abd344 h1:cDVUiFo+npB0ZASqnw4
 github.com/Yawning/aez v0.0.0-20211027044916-e49e68abd344/go.mod h1:9pIqrY6SXNL8vjRQE5Hd/OL5GyK/9MrGUWs87z/eFfk=
 github.com/airofm/sing-openvpn v0.1.4 h1:Hih0BG6WKtNVfBnXcu+zFJjurnzyBUAtxmzGONrLtFY=
 github.com/airofm/sing-openvpn v0.1.4/go.mod h1:0d5pFd2Re6H9WTT+NB/mLtrheyMAHph6OXK35FVD1jY=
+github.com/airofm/sing-openvpn v0.1.5 h1:fMdL8mzcRwAducsOqrHcNOIWefX/aWAyxTVpMGpoZ9Q=
+github.com/airofm/sing-openvpn v0.1.5/go.mod h1:0d5pFd2Re6H9WTT+NB/mLtrheyMAHph6OXK35FVD1jY=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=
 github.com/ajg/form v1.5.1/go.mod h1:uL1WgH+h2mgNtvBq0339dVnzXdBETtL2LeUXaIv25UY=
 github.com/andybalholm/brotli v1.0.6 h1:Yf9fFpf49Zrxb9NlQaluyE92/+X7UVHlhMNJN2sxfOI=

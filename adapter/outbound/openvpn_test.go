@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/component/resolver"
 	"github.com/miekg/dns"
 )
@@ -139,5 +140,49 @@ func TestRewriteProfileRemotesNoRemoteLine(t *testing.T) {
 	}
 	if string(output) != input {
 		t.Fatalf("expected output unchanged, got:\n%s", string(output))
+	}
+}
+
+func TestResolveUDPFailsClosedWhenVPNDNSUnavailable(t *testing.T) {
+	o := &OpenVPN{
+		resolver: mockResolver{
+			mapping: map[string]netip.Addr{
+				"gitlab.shiportlink.com": netip.MustParseAddr("10.31.41.10"),
+			},
+		},
+	}
+	metadata := &C.Metadata{
+		Host:    "gitlab.shiportlink.com",
+		DstPort: 443,
+	}
+
+	err := o.ResolveUDP(context.Background(), metadata)
+	if err == nil {
+		t.Fatal("expected VPN DNS failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "vpn dns resolve failed") {
+		t.Fatalf("expected vpn dns resolve failed error, got: %v", err)
+	}
+	if metadata.DstIP.IsValid() {
+		t.Fatalf("expected destination IP to remain unresolved, got: %s", metadata.DstIP)
+	}
+}
+
+func TestProbeVPNDNSRequiresConfiguredHost(t *testing.T) {
+	o := &OpenVPN{}
+	if err := o.probeVPNDNS(context.Background()); err != nil {
+		t.Fatalf("expected nil probe result without configured host, got: %v", err)
+	}
+
+	o.option = &OpenVPNOption{DNSProbeHost: " gitlab.shiportlink.com "}
+	if got := o.dnsProbeHost(); got != "gitlab.shiportlink.com" {
+		t.Fatalf("expected trimmed probe host, got: %q", got)
+	}
+	err := o.probeVPNDNS(context.Background())
+	if err == nil {
+		t.Fatal("expected probe failure with uninitialized client, got nil")
+	}
+	if !strings.Contains(err.Error(), "vpn dns probe failed") {
+		t.Fatalf("expected vpn dns probe failed error, got: %v", err)
 	}
 }
